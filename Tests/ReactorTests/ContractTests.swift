@@ -13,7 +13,7 @@ final class ContractTests: XCTestCase {
         let password = "password123"
         let client = ReactorClient(url: url, anonKey: anonKey)
 
-        let session = try await client.auth.signUp(email: email, password: password)
+        let session = try requireSession(await client.auth.signUp(email: email, password: password))
         XCTAssertEqual(session.user.email, email)
         let user = try await client.auth.getUser()
         XCTAssertEqual(user.email, email)
@@ -50,7 +50,7 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(ping["ok"]?.bool(), true)
 
         let other = ReactorClient(url: url, anonKey: anonKey)
-        _ = try await other.auth.signUp(email: otherEmail, password: password)
+        _ = try requireSession(await other.auth.signUp(email: otherEmail, password: password))
         let hidden = try await other.from("todos").select().eq("id", id).execute().array()!
         XCTAssertEqual(hidden.count, 0)
 
@@ -77,9 +77,16 @@ final class ContractTests: XCTestCase {
         let revoked = try await postRefresh(url: url, anonKey: anonKey, token: current)
         XCTAssertEqual(revoked, 401)
 
-        let again = try await client.auth.signInWithPassword(email: email, password: password)
+        let again = try requireSession(await client.auth.signInWithPassword(email: email, password: password))
         XCTAssertEqual(again.user.email, email)
     }
+}
+
+private func requireSession(_ outcome: AuthOutcome) throws -> Session {
+    guard case .session(let session) = outcome else {
+        throw ReactorError(status: 0, message: "expected a session")
+    }
+    return session
 }
 
 private func postRefresh(url: String, anonKey: String, token: String) async throws -> Int {

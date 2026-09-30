@@ -9,19 +9,23 @@ public final class ReactorClient: @unchecked Sendable {
 
     let http: URLSession
 
-    public init(url: String, anonKey: String, sessionStore: (any SessionStore)? = nil) {
+    public init(url: String, anonKey: String, sessionStore: (any SessionStore)? = nil, urlSession: URLSession? = nil) {
         let trimmed = url.hasSuffix("/") ? String(url.dropLast()) : url
         self.base = URL(string: trimmed)!
         self.anonKey = anonKey
         let store = sessionStore ?? MemorySessionStore()
         self.store = store
         self.session = store.load()
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 20
-        config.timeoutIntervalForResource = 30
-        config.waitsForConnectivity = false
-        config.httpAdditionalHeaders = ["Expect": ""]
-        self.http = URLSession(configuration: config)
+        if let urlSession {
+            self.http = urlSession
+        } else {
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 20
+            config.timeoutIntervalForResource = 30
+            config.waitsForConnectivity = false
+            config.httpAdditionalHeaders = ["Expect": ""]
+            self.http = URLSession(configuration: config)
+        }
     }
 
     public var auth: AuthAPI { AuthAPI(client: self) }
@@ -98,6 +102,13 @@ public final class ReactorClient: @unchecked Sendable {
     }
 }
 
+public enum AuthOutcome: Sendable {
+    case session(Session)
+    case verificationRequired(User)
+    case mfaRequired(token: String, factors: [String])
+    case enrollmentRequired(token: String, factors: [String])
+}
+
 public struct AuthAPI: Sendable {
     let client: ReactorClient
 
@@ -105,15 +116,15 @@ public struct AuthAPI: Sendable {
         client.currentSession()
     }
 
-    public func signUp(email: String, password: String) async throws -> Session {
-        try await client.issue(path: "/auth/v1/signup", json: .object([
+    public func signUp(email: String, password: String) async throws -> AuthOutcome {
+        try await client.outcome(path: "/auth/v1/signup", json: .object([
             "email": .string(email),
             "password": .string(password),
         ]))
     }
 
-    public func signInWithPassword(email: String, password: String) async throws -> Session {
-        try await client.issue(path: "/auth/v1/token", json: .object([
+    public func signInWithPassword(email: String, password: String) async throws -> AuthOutcome {
+        try await client.outcome(path: "/auth/v1/token", json: .object([
             "email": .string(email),
             "password": .string(password),
         ]))
@@ -177,8 +188,64 @@ public struct AuthAPI: Sendable {
         client.replaceSession(nil)
     }
 
-    public func signInWithOAuth() throws -> Never {
-        throw ReactorError(status: 0, message: "unsupported")
+    public func verifyEmail(token: String? = nil, email: String? = nil, code: String? = nil) async throws -> Session {
+        var body: [String: JSON] = [:]
+        if let token { body["token"] = .string(token) }
+        if let email { body["email"] = .string(email) }
+        if let code { body["code"] = .string(code) }
+        return try await client.issue(path: "/auth/v1/verify-email", json: .object(body))
+    }
+
+    public func resendVerification(email: String) async throws {
+        _ = try await client.call("/auth/v1/verify-email/send", method: "POST", token: client.anonKey, json: .object([
+            "email": .string(email),
+        ]))
+    }
+
+    public func verifyTotp(token: String, code: String) async throws -> Session {
+        try await client.issue(path: "/auth/v1/factors/totp", json: .object([
+            "mfa_token": .string(token),
+            "code": .string(code),
+        ]))
+    }
+
+    public func verifyPasskey(token: String, credential: JSON) async throws -> Session {
+        var body = credential.object() ?? [:]
+        body["mfa_token"] = .string(token)
+        return try await client.issue(path: "/auth/v1/factors/passkey/verify", json: .object(body))
+    }
+
+    public func verifyRecovery(token: String, code: String) async throws -> Session {
+        try await client.issue(path: "/auth/v1/factors/recovery", json: .object([
+            "mfa_token": .string(token),
+            "code": .string(code),
+        ]))
+    }
+
+    public func enrollTotp(token: String? = nil, code: String? = nil) async throws -> JSON {
+        let path = code == nil ? "/auth/v1/factors/totp/start" : "/auth/v1/factors/totp/confirm"
+        let json: JSON = code == nil ? .object([:]) : .object(["code": .string(code!)])
+        let (_, body) = try await client.call(path, method: "POST", token: token ?? client.token(), json: json)
+        return body
+    }
+
+    public func enrollPasskey(token: String? = nil, credential: JSON? = nil) async throws -> JSON {
+        let path = credential == nil ? "/auth/v1/factors/passkey/register/options" : "/auth/v1/factors/passkey/register"
+        let (_, body) = try await client.call(path, method: "POST", token: token ?? client.token(), json: credential ?? .object([:]))
+        return body
+    }
+
+    public func signInWithOAuth(provider: String, redirectTo: String) -> URL {
+        var parts = URLComponents(url: client.url("/auth/v1/authorize"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [
+            URLQueryItem(name: "provider", value: provider),
+            URLQueryItem(name: "redirect_to", value: redirectTo),
+        ]
+        return parts.url!
+    }
+
+    public func exchangeCode(_ code: String) async throws -> Session {
+        try await client.issue(path: "/auth/v1/token", json: .object(["code": .string(code)]))
     }
 }
 
@@ -189,6 +256,28 @@ extension ReactorClient {
         let session = try JSONDecoder().decode(Session.self, from: data)
         replaceSession(session)
         return session
+    }
+
+    func outcome(path: String, json: JSON) async throws -> AuthOutcome {
+        let (_, body) = try await call(path, method: "POST", token: anonKey, json: json)
+        if body["access_token"]?.string() != nil {
+            let data = try JSONSerialization.data(withJSONObject: body.foundation())
+            let session = try JSONDecoder().decode(Session.self, from: data)
+            replaceSession(session)
+            return .session(session)
+        }
+        let user = User(id: body["user"]?["id"]?.string() ?? "", email: body["user"]?["email"]?.string() ?? "")
+        let factors = body["factors"]?.array()?.compactMap { $0.string() } ?? []
+        if body["verification_required"]?.bool() == true {
+            return .verificationRequired(user)
+        }
+        if body["mfa_required"]?.bool() == true {
+            return .mfaRequired(token: body["mfa_token"]?.string() ?? "", factors: factors)
+        }
+        if body["enrollment_required"]?.bool() == true {
+            return .enrollmentRequired(token: body["enroll_token"]?.string() ?? "", factors: factors)
+        }
+        throw ReactorError(status: 0, message: "unrecognized auth response")
     }
 }
 

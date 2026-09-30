@@ -3,10 +3,10 @@
 Swift client for Reactor. Auth, a query builder, file storage, and functions for iOS 17 and macOS 14.
 
 ```swift
-.package(url: "https://github.com/reactor-cloud/reactor-swift", exact: "1.26.09-beta.1")
+.package(url: "https://github.com/reactor-cloud/reactor-swift", exact: "1.26.09-beta.2")
 ```
 
-[reactor.cloud](https://www.reactor.cloud) · [docs](https://github.com/reactor-cloud/reactor/blob/v1.26.09-beta.1/docs/clients/swift.md)
+[reactor.cloud](https://www.reactor.cloud) · [docs](https://github.com/reactor-cloud/reactor/blob/v1.26.09-beta.2/docs/clients/swift.md)
 
 ```swift
 import Reactor
@@ -36,9 +36,9 @@ let result = try await reactor.functions.invoke("ping", body: .object(["hello": 
 | Storage | `reactor.storage.from(bucket)` — upload and download |
 | Functions | `reactor.functions.invoke(name)` |
 
-`sessionStore` defaults to memory. `KeychainSessionStore` keeps the session under `lab.reactor.session`. The query builder covers the calls a first app needs. Use HTTP for the rest of PostgREST. `signInWithOAuth` throws.
+`sessionStore` defaults to memory. `KeychainSessionStore` keeps the session under `lab.reactor.session`. The query builder covers the calls a first app needs. Use HTTP for the rest of PostgREST. `signInWithOAuth(provider:redirectTo:)` returns the authorize URL. `signUp` returns `AuthOutcome`.
 
-The product name is `Reactor`. Tag `v1.26.09-beta.1`.
+The product name is `Reactor`. Tag `v1.26.09-beta.2`.
 
 ## License
 
