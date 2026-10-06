@@ -3,10 +3,10 @@
 Swift client for Reactor. Auth, a query builder, file storage, and functions for iOS 17 and macOS 14.
 
 ```swift
-.package(url: "https://github.com/reactor-cloud/reactor-swift", exact: "1.26.09-beta.2")
+.package(url: "https://github.com/reactor-cloud/reactor-swift", exact: "1.26.10-beta8")
 ```
 
-[reactor.cloud](https://www.reactor.cloud) · [docs](https://github.com/reactor-cloud/reactor/blob/v1.26.09-beta.2/docs/clients/swift.md)
+[reactor.cloud](https://www.reactor.cloud) · [docs](https://github.com/reactor-cloud/reactor/blob/v1.26.10-beta8/docs/clients/swift.md)
 
 ```swift
 import Reactor
@@ -34,11 +34,12 @@ let result = try await reactor.functions.invoke("ping", body: .object(["hello": 
 | Auth | `reactor.auth` — sign up, password, session, sign out |
 | Data | `reactor.from(table)` — select, insert, update, delete |
 | Storage | `reactor.storage.from(bucket)` — upload and download |
-| Functions | `reactor.functions.invoke(name)` |
+| Functions | `reactor.functions.invoke(name)`, `reactor.functions.enqueue(name)`, `reactor.functions.task(id)` |
+| Queue | `reactor.queue` — create, send, read, peek, subscribe. Needs the service key and `REACTOR_EXTENSIONS=queue` |
 
 `sessionStore` defaults to memory. `KeychainSessionStore` keeps the session under `lab.reactor.session`. The query builder covers the calls a first app needs. Use HTTP for the rest of PostgREST. `signInWithOAuth(provider:redirectTo:)` returns the authorize URL. `signUp` returns `AuthOutcome`.
 
-The product name is `Reactor`. Tag `v1.26.09-beta.2`.
+The product name is `Reactor`. Tag `v1.26.10-beta8`.
 
 ## License
 

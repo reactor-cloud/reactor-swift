@@ -31,6 +31,7 @@ public final class ReactorClient: @unchecked Sendable {
     public var auth: AuthAPI { AuthAPI(client: self) }
     public var storage: StorageAPI { StorageAPI(client: self) }
     public var functions: FunctionsAPI { FunctionsAPI(client: self) }
+    public var queue: QueueAPI { QueueAPI(client: self) }
 
     public func from(_ table: String) -> Query {
         Query(client: self, table: table)
@@ -327,6 +328,91 @@ public struct FunctionsAPI: Sendable {
     public func invoke(_ name: String, body: JSON = .object([:])) async throws -> JSON {
         let (_, response) = try await client.call("/fn/v1/\(name)", method: "POST", token: client.token(), json: body)
         return response
+    }
+
+    public func enqueue(_ name: String, body: JSON = .object([:]), delaySecs: Int? = nil, maxAttempts: Int? = nil) async throws -> JSON {
+        var fields: [String: JSON] = ["body": body]
+        if let delaySecs { fields["delay_secs"] = .int(delaySecs) }
+        if let maxAttempts { fields["max_attempts"] = .int(maxAttempts) }
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let (_, response) = try await client.call("/fn/v1/\(encoded)/enqueue", method: "POST", token: client.token(), json: .object(fields))
+        return response
+    }
+
+    public func task(_ id: String) async throws -> JSON {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let (_, response) = try await client.call("/fn/v1/_admin/tasks/\(encoded)", token: client.token())
+        return response
+    }
+}
+
+public struct QueueAPI: Sendable {
+    let client: ReactorClient
+
+    public func list() async throws -> JSON {
+        let (_, response) = try await client.call("/queue/v1/queues", token: client.token())
+        return response
+    }
+
+    public func create(_ name: String) async throws -> JSON {
+        let (_, response) = try await client.call("/queue/v1/queues", method: "POST", token: client.token(), json: .object(["name": .string(name)]))
+        return response
+    }
+
+    public func send(_ name: String, message: JSON, delaySecs: Int? = nil) async throws -> JSON {
+        var fields: [String: JSON] = ["message": message]
+        if let delaySecs { fields["delay_secs"] = .int(delaySecs) }
+        let (_, response) = try await client.call(Self.path(name, "send"), method: "POST", token: client.token(), json: .object(fields))
+        return response
+    }
+
+    public func read(_ name: String, vtSecs: Int? = nil, qty: Int? = nil) async throws -> JSON {
+        var fields: [String: JSON] = [:]
+        if let vtSecs { fields["vt_secs"] = .int(vtSecs) }
+        if let qty { fields["qty"] = .int(qty) }
+        let (_, response) = try await client.call(Self.path(name, "read"), method: "POST", token: client.token(), json: .object(fields))
+        return response
+    }
+
+    public func peek(_ name: String) async throws -> JSON {
+        let (_, response) = try await client.call(Self.path(name, "peek"), token: client.token())
+        return response
+    }
+
+    public func delete(_ name: String, msgId: Int) async throws {
+        _ = try await client.call(Self.path(name, "delete"), method: "POST", token: client.token(), json: .object(["msg_id": .int(msgId)]))
+    }
+
+    public func archive(_ name: String, msgId: Int) async throws {
+        _ = try await client.call(Self.path(name, "archive"), method: "POST", token: client.token(), json: .object(["msg_id": .int(msgId)]))
+    }
+
+    public func subscribe(_ name: String, functionName: String, vtSecs: Int, qty: Int, maxReads: Int) async throws {
+        _ = try await client.call(
+            Self.path(name, "subscriptions"),
+            method: "POST",
+            token: client.token(),
+            json: .object([
+                "function_name": .string(functionName),
+                "vt_secs": .int(vtSecs),
+                "qty": .int(qty),
+                "max_reads": .int(maxReads),
+            ])
+        )
+    }
+
+    public func unsubscribe(_ name: String, functionName: String) async throws {
+        _ = try await client.call(
+            Self.path(name, "subscriptions"),
+            method: "DELETE",
+            token: client.token(),
+            json: .object(["function_name": .string(functionName)])
+        )
+    }
+
+    private static func path(_ name: String, _ action: String) -> String {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        return "/queue/v1/queues/\(encoded)/\(action)"
     }
 }
 
