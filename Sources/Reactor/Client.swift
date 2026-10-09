@@ -292,6 +292,15 @@ public struct StorageAPI: Sendable {
     public func from(_ bucket: String) -> Bucket {
         Bucket(client: client, bucket: bucket)
     }
+
+    public func createBucket(_ name: String, isPublic: Bool = false) async throws {
+        let (_, _) = try await client.call(
+            "/storage/v1/bucket",
+            method: "POST",
+            token: client.token(),
+            json: .object(["name": .string(name), "public": .bool(isPublic)])
+        )
+    }
 }
 
 public struct Bucket: Sendable {
@@ -301,6 +310,26 @@ public struct Bucket: Sendable {
     public func upload(path: String, data: Data, contentType: String = "application/octet-stream") async throws {
         let signed = try await presign(path: path, method: "PUT")
         _ = try await client.raw(signed, method: "PUT", body: data, contentType: contentType)
+    }
+
+    public func getPublicUrl(path: String) async throws -> URL {
+        let encoded = bucket.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? bucket
+        let (_, body) = try await client.call(
+            "/storage/v1/bucket/\(encoded)",
+            method: "GET",
+            token: client.token(),
+            json: nil
+        )
+        guard body["public"]?.bool() == true, let root = body["public_url_base"]?.string() else {
+            throw ReactorError(status: 404, message: "bucket is not public")
+        }
+        let suffix = path.split(separator: "/").map {
+            String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0)
+        }.joined(separator: "/")
+        guard let url = URL(string: "\(root)/\(suffix)") else {
+            throw ReactorError(status: 500, message: "missing public url")
+        }
+        return url
     }
 
     public func download(path: String) async throws -> Data {
